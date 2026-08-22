@@ -1,7 +1,7 @@
 /* TESR PDF Editor — client-side (pdf-lib + PDF.js + JSZip) */
 'use strict';
 const LIBS_OK = typeof PDFLib !== 'undefined' && typeof pdfjsLib !== 'undefined' && typeof JSZip !== 'undefined';
-const { PDFDocument, degrees, rgb, BlendMode, LineCapStyle } = LIBS_OK ? PDFLib : {};
+const { PDFDocument, degrees, rgb, BlendMode, LineCapStyle, PDFName, PDFHexString, PDFArray, PDFNumber } = LIBS_OK ? PDFLib : {};
 if (LIBS_OK) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 /* ---------- utils ---------- */
@@ -56,6 +56,8 @@ const TD = { // tool defaults
   shape: { kind: 'rect', stroke: '#b8102a', width: 2, fill: '#ffffff', fillOn: false },
   image: { asset: null }, sign: { asset: null },
   wm: { type: 'text', text: settings.wm || 'TESR CONFIDENTIAL', opacity: 25, rotate: 45, size: 60, color: '#b8102a', all: true },
+  redact: { color: '#000000' }, note: { color: '#ffd23f', author: settings.author || 'TESR' },
+  stamp: { text: 'อนุมัติ', color: '#b8102a' },
   pagenum: { pos: 'bc', fmt: '{n}', size: 11, color: '#000000', start: 1, skip: false },
 };
 const dispSize = p => { const r = (p.baseRot + p.rot) % 360; return r % 180 ? { W: p.h, H: p.w, r } : { W: p.w, H: p.h, r }; };
@@ -133,6 +135,10 @@ function annotSvg(a) {
     case 'image': e = svgEl('image', { x: a.x, y: a.y, width: a.w, height: a.h, href: assets[a.asset]?.url || '', preserveAspectRatio: 'none', opacity: op }); break;
     case 'highlight': e = svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: a.color, opacity: .45, style: 'mix-blend-mode:multiply' }); break;
     case 'whiteout': e = svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: a.color }); break;
+    case 'redact': e = svgEl('g'); e.appendChild(svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: a.color, stroke: '#ff3b3b', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' })); break;
+    case 'ocr': e = svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: 'transparent', stroke: 'rgba(63,178,127,.35)', 'stroke-width': .5 }); break;
+    case 'note': { e = svgEl('g', { class: 'noteic' }); const s = 20; a.w = s; a.h = s; e.appendChild(svgEl('path', { d: `M${a.x} ${a.y + 3}a3 3 0 013-3h${s - 6}a3 3 0 013 3v${s * .55}a3 3 0 01-3 3h-${s * .45}l-${s * .25} ${s * .25}v-${s * .25}h-${s * .1}a3 3 0 01-3-3z`, fill: a.color, stroke: '#5a4500', 'stroke-width': .8 })); [0.3, 0.5].forEach((f, k) => e.appendChild(svgEl('line', { x1: a.x + s * .22, y1: a.y + s * f, x2: a.x + s * (k ? .55 : .78), y2: a.y + s * f, stroke: '#5a4500', 'stroke-width': 1.2 }))); e.appendChild(svgEl('title')).textContent = a.text; break; }
+    case 'stamp': { e = svgEl('g'); const m = measureText(a); e.appendChild(svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: 'none', stroke: a.color, 'stroke-width': 2.5, rx: 3 })); const t = svgEl('text', { x: a.x + m.pad, y: a.y + m.pad + a.size * .9, 'font-size': a.size, fill: a.color, 'font-family': 'Kanit, sans-serif', 'font-weight': 700, opacity: op }); t.textContent = a.text; e.appendChild(t); break; }
     case 'rect': e = svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, fill: a.fillOn ? a.fill : 'none', stroke: a.stroke, 'stroke-width': a.width }); break;
     case 'ellipse': e = svgEl('ellipse', { cx: a.x + a.w / 2, cy: a.y + a.h / 2, rx: a.w / 2, ry: a.h / 2, fill: a.fillOn ? a.fill : 'none', stroke: a.stroke, 'stroke-width': a.width }); break;
     case 'line': case 'arrow': { e = svgEl('g'); e.appendChild(svgEl('line', { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, stroke: a.stroke, 'stroke-width': a.width, 'stroke-linecap': 'round' })); if (a.type === 'arrow') { const [h1, h2] = arrowHead(a); e.appendChild(svgEl('line', { x1: a.x2, y1: a.y2, x2: h1[0], y2: h1[1], stroke: a.stroke, 'stroke-width': a.width, 'stroke-linecap': 'round' })); e.appendChild(svgEl('line', { x1: a.x2, y1: a.y2, x2: h2[0], y2: h2[1], stroke: a.stroke, 'stroke-width': a.width, 'stroke-linecap': 'round' })); } e.appendChild(svgEl('line', { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, stroke: 'transparent', 'stroke-width': Math.max(14, a.width + 10) })); break; }
@@ -152,18 +158,58 @@ const I = {
   whiteout: '<svg viewBox="0 0 24 24"><path d="M3 17l7 4 11-11-7-7L3 14z"/><path d="M10 21l-5-5"/><path d="M4 22h16"/></svg>', image: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg>',
   shape: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="9" height="9" rx="1"/><circle cx="16.5" cy="16.5" r="4.5"/></svg>', sign: '<svg viewBox="0 0 24 24"><path d="M3 17c3-6 6-8 7-6s-1 6 0 6 3-5 5-5 1 5 3 5 2-3 3-3"/><path d="M3 21h18"/></svg>',
   wm: '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M12 9c-2 2.5-3 4-3 5.5a3 3 0 006 0C15 13 14 11.5 12 9z"/></svg>', pagenum: '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M11 17h2"/></svg>',
-  rotate: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-3-6.2"/><path d="M20 4v5h-5"/></svg>', pages: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 14v6M14 17h6"/></svg>',
+  rotate: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-3-6.2"/><path d="M20 4v5h-5"/></svg>',
+  redact: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h10M7 14h6" stroke-width="3"/></svg>', note: '<svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 012-2h12a2 2 0 012 2v9a2 2 0 01-2 2h-7l-5 4v-4H6a2 2 0 01-2-2z"/><path d="M8 8h8M8 12h5"/></svg>',
+  stamp: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h10"/></svg>', ocr: '<svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>',
+  img: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M21 16l-5-5-8 8"/></svg>', txt: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h6"/></svg>',
+  docx: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6"/><path d="M8 13l1.5 5 1.5-4 1.5 4L14 13"/></svg>', compress: '<svg viewBox="0 0 24 24"><path d="M4 9h4M8 9V5M20 9h-4M16 9V5M4 15h4M8 15v4M20 15h-4M16 15v4"/></svg>',
+  split: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>', merge: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="10" height="13" rx="2"/><path d="M8 3h10a2 2 0 012 2v11"/></svg>',
+  date: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>', share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>',
+  print: '<svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="7"/></svg>', meta: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>', pages: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 14v6M14 17h6"/></svg>',
 };
-const TOOLS = [['select', 'เลือก'], ['text', 'ข้อความ'], ['highlight', 'ไฮไลท์'], ['draw', 'ปากกา'], ['whiteout', 'ยางลบ'], ['shape', 'รูปทรง'], ['image', 'รูปภาพ'], ['sign', 'ลายเซ็น'], null, ['wm', 'ลายน้ำ'], ['pagenum', 'เลขหน้า'], ['rotate', 'หมุนหน้า'], ['pages', 'จัดหน้า']];
-$('#tools').innerHTML = TOOLS.map(t => t ? `<button class="tool" data-t="${t[0]}" title="${t[1]}">${I[t[0]]}<span>${t[1]}</span></button>` : '<div class="tool sepr"></div>').join('');
-$('#tools').addEventListener('click', e => { const b = e.target.closest('.tool[data-t]'); if (b) setTool(b.dataset.t); });
+/* toolbar tabs: t = tool, a = action */
+const TABS = {
+  all: [['t', 'select', 'เลือก'], ['t', 'text', 'ข้อความ'], ['t', 'highlight', 'ไฮไลท์'], ['t', 'draw', 'ปากกา'], ['t', 'whiteout', 'ยางลบ'], ['t', 'shape', 'รูปทรง'], ['t', 'image', 'รูปภาพ'], ['t', 'note', 'หมายเหตุ'], null, ['t', 'sign', 'ลายเซ็น'], ['t', 'stamp', 'ตราประทับ'], ['t', 'wm', 'ลายน้ำ'], ['t', 'pagenum', 'เลขหน้า'], ['t', 'redact', 'ปกปิด'], null, ['t', 'rotate', 'หมุนหน้า'], ['t', 'pages', 'จัดหน้า'], ['a', 'ocr', 'OCR']],
+  edit: [['t', 'select', 'เลือก'], ['t', 'text', 'ข้อความ'], ['t', 'highlight', 'ไฮไลท์'], ['t', 'draw', 'ปากกา'], ['t', 'whiteout', 'ยางลบ'], ['t', 'shape', 'รูปทรง'], ['t', 'image', 'รูปภาพ'], ['t', 'note', 'หมายเหตุ'], ['t', 'redact', 'ปกปิด'], null, ['t', 'rotate', 'หมุนหน้า'], ['t', 'pages', 'จัดหน้า']],
+  convert: [['a', 'images', 'PDF → JPG', 'img'], ['a', 'text', 'PDF → TXT', 'txt'], ['a', 'docx', 'PDF → Word', 'docx'], ['a', 'ocr', 'OCR ไทย/อังกฤษ', 'ocr'], null, ['a', 'compress', 'ลดขนาด', 'compress'], ['a', 'range', 'แยกไฟล์', 'split'], ['a', 'merge', 'รวมไฟล์', 'merge'], ['a', 'pdf', 'ดาวน์โหลด PDF', 'share']],
+  sign: [['t', 'select', 'เลือก'], ['t', 'sign', 'ลายเซ็น'], ['t', 'stamp', 'ตราประทับ'], ['a', 'date', 'วันที่', 'date'], ['t', 'text', 'ข้อความ'], null, ['t', 'wm', 'ลายน้ำ'], ['a', 'pdf', 'ดาวน์โหลด', 'share']],
+};
+let curTab = 'all';
+function buildToolbar(tab) { curTab = tab; $('#tools').innerHTML = TABS[tab].map(t => t ? `<button class="tool ${t[0] === 't' && t[1] === tool ? 'on' : ''}" data-${t[0]}="${t[1]}" title="${t[2]}">${I[t[3] || t[1]]}<span>${t[2]}</span></button>` : '<div class="tool sepr"></div>').join(''); document.querySelectorAll('.mbar .tab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); }
+buildToolbar('all');
+$('#tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if (!b) return; if (b.dataset.t) setTool(b.dataset.t); else if (b.dataset.a) runAction(b.dataset.a); });
+document.querySelectorAll('.mbar .tab').forEach(b => b.onclick = () => buildToolbar(b.dataset.tab));
+function runAction(a) {
+  if (a === 'merge') return $('#addIn').click();
+  if (a === 'date') { snapshot(); const p = pages[curPage]; const { W, H } = dispSize(p); const t = { id: uid(), type: 'text', text: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }), size: 14, color: '#000000', font: 'Sarabun', bold: false }; Object.assign(t, (({ w, h }) => ({ w, h }))(measureText(t))); t.x = W - t.w - 40; t.y = H - t.h - 60; p.annots.push(t); setTool('select'); sel = { page: curPage, id: t.id }; drawOverlay(curPage); renderProps(true); return; }
+  if (a === 'ocr') return openOcrModal();
+  runExport(a);
+}
+/* all-tools panel */
+const ALLTOOLS = [
+  ['แก้ไข', [['t', 'text', 'ใส่ข้อความ', 'พิมพ์ข้อความไทย/อังกฤษบนหน้า', '#2b7a3a'], ['t', 'highlight', 'ไฮไลท์', 'เน้นข้อความ', '#c07a0c'], ['t', 'whiteout', 'ยางลบ / ปิดทับ', 'ลบข้อความเก่า ลายน้ำ', '#4a4a55'], ['t', 'redact', 'ปกปิดข้อมูล (Redact)', 'ลบเนื้อหาใต้กรอบออกจริง', '#000000'], ['t', 'note', 'หมายเหตุ', 'ความคิดเห็นแบบ PDF Comment', '#b8860b'], ['t', 'image', 'รูปภาพ', 'วางรูปบนหน้า', '#0e8fc9'], ['t', 'shape', 'รูปทรง', 'สี่เหลี่ยม วงรี เส้น ลูกศร', '#6f3fcf']]],
+  ['ลงนาม', [['t', 'sign', 'ลายเซ็น', 'วาดหรืออัปโหลด', '#8b0000'], ['t', 'stamp', 'ตราประทับ', 'อนุมัติ / ตรวจแล้ว / ลับ', '#b8102a'], ['a', 'date', 'ใส่วันที่', 'วันที่วันนี้ภาษาไทย', '#5846d6'], ['t', 'wm', 'ลายน้ำ', 'ข้อความ / โลโก้ TESR', '#b11dab']]],
+  ['จัดการหน้า', [['t', 'pages', 'จัดหน้า', 'สลับ หมุน ลบ ทำสำเนา', '#108a7a'], ['a', 'merge', 'รวมไฟล์', 'เพิ่มหน้าจาก PDF/รูป', '#1f4fbf'], ['a', 'range', 'แยกไฟล์', 'ดึงบางหน้า / แยก ZIP', '#1a8fa0'], ['t', 'pagenum', 'เลขหน้า', 'ใส่เลขหน้าอัตโนมัติ', '#5846d6']]],
+  ['แปลง', [['a', 'ocr', 'สแกน & OCR', 'ทำ PDF สแกนให้ค้นหาได้ (ไทย/อังกฤษ)', '#cc1f3a'], ['a', 'images', 'PDF → JPG / PNG', 'ทุกหน้าเป็นรูป', '#d98a10'], ['a', 'docx', 'PDF → Word', 'ข้อความเป็น .docx', '#1f4fbf'], ['a', 'text', 'PDF → TXT', 'ดึงข้อความ', '#5f6b1c'], ['a', 'compress', 'ลดขนาด', 'บีบอัดทุกหน้า', '#c07a0c']]],
+  ['ไฟล์', [['a', 'pdf', 'ดาวน์โหลด PDF', 'รวมการแก้ไขทั้งหมด', '#c9a84c'], ['a', 'share', 'แชร์', 'ส่งผ่าน LINE / อีเมล (มือถือ)', '#3fb27f'], ['a', 'print', 'พิมพ์', '', '#4a4a55'], ['a', 'meta', 'ข้อมูลไฟล์', 'Title / Author / ชื่อไฟล์', '#6b5a2b']]],
+];
+$('#allTools').innerHTML = ALLTOOLS.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(t => `<button data-${t[0]}="${t[1]}" style="--c:${t[4]}"><span class="ic">${I[t[1]] || I.txt}</span><span>${t[2]}<small>${t[3]}</small></span></button>`).join('')).join('');
+$('#allTools').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (window.innerWidth <= 980) $('#ebody').classList.remove('showThumbs'); if (b.dataset.t) setTool(b.dataset.t); else if (b.dataset.a === 'print') $('#printBtn').click(); else runAction(b.dataset.a); });
+document.querySelectorAll('.ltabs button[data-lt]').forEach(b => b.onclick = () => setLeftTab(b.dataset.lt));
+function setLeftTab(t) { document.querySelectorAll('.ltabs button[data-lt]').forEach(x => x.classList.toggle('on', x.dataset.lt === t)); $('#allTools').style.display = t === 'tools' ? '' : 'none'; $('#thumbs').style.display = t === 'pages' ? '' : 'none'; }
+/* right rail */
+$('#rPages').onclick = () => { setLeftTab('pages'); $('#ebody').classList.toggle('showThumbs'); }; $('#rFind').onclick = () => $('#findIn').focus();
+$('#rPrev').onclick = () => scrollToPage(Math.max(0, curPage - 1)); $('#rNext').onclick = () => scrollToPage(Math.min(pages.length - 1, curPage + 1));
+$('#rRot').onclick = () => rotatePage(curPage, 90); $('#rZin').onclick = () => setZoom(zoom * 1.2); $('#rZout').onclick = () => setZoom(zoom / 1.2); $('#rFit').onclick = () => { zoomFit(); setZoom(zoom); };
+$('#pgIn').addEventListener('change', e => { const n = clamp(parseInt(e.target.value) || 1, 1, pages.length); scrollToPage(n - 1); });
+
 function setTool(t) {
   if (t === 'rotate') { rotatePage(curPage, 90); return; }
-  if (t === 'pages') { $('#ebody').classList.toggle('showThumbs'); return; }
+  if (t === 'pages') { setLeftTab('pages'); $('#ebody').classList.toggle('showThumbs'); return; }
   tool = t; sel = null; document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.t === t)); stage.classList.toggle('cross', t !== 'select');
   pageEls.forEach((_, i) => drawOverlay(i)); renderProps();
   if (t === 'image' && !TD.image.asset) pickImage('image'); if (t === 'sign' && !TD.sign.asset) openSignModal();
-  if (window.innerWidth <= 980 && ['wm', 'pagenum', 'text', 'shape', 'draw'].includes(t)) $('#ebody').classList.add('showProps');
+  if (window.innerWidth <= 980 && ['wm', 'pagenum', 'text', 'shape', 'draw', 'stamp', 'note'].includes(t)) $('#ebody').classList.add('showProps');
 }
 function pickImage(which) { const inp = el('input', { type: 'file', accept: 'image/*' }); inp.onchange = async () => { if (!inp.files[0]) return; const a = await imageFileToAsset(inp.files[0], { maxW: 1800 }); assets[a.id] = a; TD[which].asset = a.id; toast('แตะบนหน้าเพื่อวางรูป'); renderProps(); }; inp.click(); }
 
@@ -183,8 +229,11 @@ stage.addEventListener('pointerdown', e => {
   const { W, H } = dispSize(p); e.preventDefault(); stage.setPointerCapture(e.pointerId); stage.classList.add('drawing');
   if (tool === 'text') { snapshot(); const a = { id: uid(), type: 'text', x, y, text: 'ข้อความ', ...TD.text }; Object.assign(a, measureText(a)); delete a.lines; delete a.pad; delete a.lh; p.annots.push(a); sel = { page: i, id: a.id }; drawOverlay(i); setTool('select'); sel = { page: i, id: a.id }; drawOverlay(i); renderProps(true); return; }
   if (tool === 'image' || tool === 'sign') { const aid = TD[tool].asset; if (!aid) { tool === 'image' ? pickImage('image') : openSignModal(); return; } const as = assets[aid]; const w = W * (tool === 'sign' ? .25 : .4), h = w * as.h / as.w; snapshot(); const a = { id: uid(), type: 'image', x: x - w / 2, y: y - h / 2, w, h, asset: aid }; p.annots.push(a); sel = { page: i, id: a.id }; setTool('select'); sel = { page: i, id: a.id }; drawOverlay(i); renderProps(); return; }
+  if (tool === 'stamp') { snapshot(); const a = { id: uid(), type: 'stamp', text: TD.stamp.text, color: TD.stamp.color, size: 22, font: 'Kanit', bold: true }; Object.assign(a, (({ w, h }) => ({ w, h }))(measureText(a))); a.w += 10; a.x = x - a.w / 2; a.y = y - a.h / 2; p.annots.push(a); setTool('select'); sel = { page: i, id: a.id }; drawOverlay(i); renderProps(); return; }
+  if (tool === 'note') { snapshot(); const a = { id: uid(), type: 'note', x, y, w: 20, h: 20, text: '', color: TD.note.color, author: TD.note.author }; p.annots.push(a); setTool('select'); sel = { page: i, id: a.id }; drawOverlay(i); renderProps(true); return; }
   snapshot(); let a;
-  if (tool === 'draw') a = { id: uid(), type: 'ink', pts: [[x, y]], stroke: TD.draw.color, width: TD.draw.width, x, y, w: 1, h: 1 };
+  if (tool === 'redact') a = { id: uid(), type: 'redact', x, y, w: 1, h: 1, color: TD.redact.color };
+  else if (tool === 'draw') a = { id: uid(), type: 'ink', pts: [[x, y]], stroke: TD.draw.color, width: TD.draw.width, x, y, w: 1, h: 1 };
   else if (tool === 'highlight') a = { id: uid(), type: 'highlight', x, y, w: 1, h: 1, color: TD.highlight.color };
   else if (tool === 'whiteout') a = { id: uid(), type: 'whiteout', x, y, w: 1, h: 1, color: TD.whiteout.color };
   else if (tool === 'shape') { const k = TD.shape.kind; a = k === 'line' || k === 'arrow' ? { id: uid(), type: k, x1: x, y1: y, x2: x, y2: y, stroke: TD.shape.stroke, width: TD.shape.width } : { id: uid(), type: k, x, y, w: 1, h: 1, stroke: TD.shape.stroke, width: TD.shape.width, fill: TD.shape.fill, fillOn: TD.shape.fillOn }; }
@@ -223,7 +272,7 @@ document.addEventListener('keydown', e => {
   else if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSel(); } else if (e.key === 'Escape') setTool('select');
 });
 function deleteSel() { if (!sel) return; snapshot(); const p = pages[sel.page]; p.annots = p.annots.filter(a => a.id !== sel.id); const i = sel.page; sel = null; drawOverlay(i); renderProps(); }
-function updateSel(fn) { if (!sel) return; const a = pages[sel.page].annots.find(q => q.id === sel.id); if (!a) return; fn(a); if (a.type === 'text') Object.assign(a, (({ w, h }) => ({ w, h }))(measureText(a))); drawOverlay(sel.page); }
+function updateSel(fn) { if (!sel) return; const a = pages[sel.page].annots.find(q => q.id === sel.id); if (!a) return; fn(a); if (a.type === 'text' || a.type === 'stamp') Object.assign(a, (({ w, h }) => ({ w, h }))(measureText(a))); drawOverlay(sel.page); }
 
 /* ---------- props panel ---------- */
 const F = {
@@ -248,6 +297,10 @@ function renderProps(focusText = false) {
     if (a.type === 'text') { html = head('ข้อความ') + `<div class="opt">${F.area('pTxt', 'เนื้อหา', a.text)}<div class="row">${F.num('pSz', 'ขนาด', Math.round(a.size), 4, 200)}${F.color('pCol', 'สี', a.color)}</div>${F.sel('pFont', 'ฟอนต์', [['Sarabun', 'Sarabun'], ['Kanit', 'Kanit'], ['serif', 'Serif'], ['monospace', 'Monospace']], a.font)}${F.chk('pBold', 'ตัวหนา', a.bold)}${F.range('pOp', 'ความทึบ', Math.round((a.opacity ?? 1) * 100), 5, 100, 5, '%')}${common}</div>`; bind = () => { const u = () => updateSel(q => { q.text = V('pTxt'); q.size = V('pSz'); q.color = V('pCol'); q.font = V('pFont'); q.bold = V('pBold'); q.opacity = V('pOp') / 100; }); ['pTxt', 'pSz', 'pCol', 'pFont', 'pBold', 'pOp'].forEach(id => $('#' + id).addEventListener('input', u)); if (focusText) { if (window.innerWidth <= 980) $('#ebody').classList.add('showProps'); const t = $('#pTxt'); t.focus(); t.select(); } }; }
     else if (a.type === 'image') { html = head('รูปภาพ / ลายเซ็น') + `<div class="opt">${F.range('pW', 'ความกว้าง (% ของหน้า)', Math.round(a.w / dispSize(pages[sel.page]).W * 100), 2, 100, 1, '%')}${F.range('pOp', 'ความทึบ', Math.round((a.opacity ?? 1) * 100), 5, 100, 5, '%')}${F.range('pRot', 'มุม', a.rotate || 0, -180, 180, 5, '°')}${common}</div>`; bind = () => ['pW', 'pOp', 'pRot'].forEach(id => $('#' + id).addEventListener('input', () => updateSel(q => { const W = dispSize(pages[sel.page]).W; const nw = W * V('pW') / 100; q.h = q.h * nw / q.w; q.w = nw; q.opacity = V('pOp') / 100; q.rotate = V('pRot'); }))); }
     else if (['rect', 'ellipse', 'line', 'arrow', 'ink'].includes(a.type)) { const hasFill = a.type === 'rect' || a.type === 'ellipse'; html = head(a.type === 'ink' ? 'เส้นปากกา' : 'รูปทรง') + `<div class="opt"><div class="row">${F.color('pSt', 'สีเส้น', a.stroke)}${F.num('pWd', 'ความหนา', a.width, 1, 40)}</div>${hasFill ? `${F.chk('pFillOn', 'เติมสี', a.fillOn)}${F.color('pFill', 'สีพื้น', a.fill)}` : ''}${common}</div>`; bind = () => ['pSt', 'pWd', 'pFillOn', 'pFill'].forEach(id => $('#' + id)?.addEventListener('input', () => updateSel(q => { q.stroke = V('pSt'); q.width = V('pWd'); if (hasFill) { q.fillOn = V('pFillOn'); q.fill = V('pFill'); } }))); }
+    else if (a.type === 'note') { html = head('หมายเหตุ') + `<div class="opt">${F.area('pNote', 'ข้อความ', a.text)}${F.text('pAuth', 'ผู้เขียน', a.author)}${F.seg('pNC', 'สี', [['#ffd23f', 'เหลือง'], ['#7dff7d', 'เขียว'], ['#7fd7ff', 'ฟ้า'], ['#ff8a8a', 'แดง']], a.color)}<div class="note">จะถูกบันทึกเป็น Comment มาตรฐานของ PDF เปิดดูใน Acrobat / Chrome ได้</div>${common}</div>`; bind = () => { ['pNote', 'pAuth', 'pNC'].forEach(id => $('#' + id).addEventListener('input', () => updateSel(q => { q.text = V('pNote'); q.author = V('pAuth'); q.color = V('pNC'); }))); if (focusText) { if (window.innerWidth <= 980) $('#ebody').classList.add('showProps'); $('#pNote').focus(); } }; }
+    else if (a.type === 'stamp') { html = head('ตราประทับ') + `<div class="opt">${F.text('pSTxt', 'ข้อความ', a.text)}<div class="row">${F.num('pSSz', 'ขนาด', Math.round(a.size), 6, 120)}${F.color('pSCol', 'สี', a.color)}</div>${F.range('pOp', 'ความทึบ', Math.round((a.opacity ?? 1) * 100), 5, 100, 5, '%')}${F.range('pRot', 'มุม', a.rotate || 0, -90, 90, 5, '°')}${common}</div>`; bind = () => ['pSTxt', 'pSSz', 'pSCol', 'pOp', 'pRot'].forEach(id => $('#' + id).addEventListener('input', () => updateSel(q => { q.text = V('pSTxt'); q.size = V('pSSz'); q.color = V('pSCol'); q.opacity = V('pOp') / 100; q.rotate = V('pRot'); q.w += 10; }))); }
+    else if (a.type === 'redact') { html = head('ปกปิดข้อมูล') + `<div class="opt">${F.color('pRC', 'สี', a.color)}<div class="note">ตอนดาวน์โหลด หน้านี้จะถูกแปลงเป็นภาพและเนื้อหาใต้กรอบจะถูกลบออกถาวร (ค้นหา/คัดลอกไม่ได้)</div>${common}</div>`; bind = () => $('#pRC').addEventListener('input', () => updateSel(q => q.color = V('pRC'))); }
+    else if (a.type === 'ocr') { html = head('ข้อความจาก OCR') + `<div class="opt"><div class="note">${esc(a.text)}</div>${common}</div>`; }
     else { html = head(a.type === 'highlight' ? 'ไฮไลท์' : 'ปิดทับ') + `<div class="opt">${F.color('pC', 'สี', a.color)}${common}</div>`; bind = () => $('#pC').addEventListener('input', () => updateSel(q => q.color = V('pC'))); }
   } else {
     switch (tool) {
@@ -257,6 +310,9 @@ function renderProps(focusText = false) {
       case 'highlight': html = head('ไฮไลท์') + `<div class="opt">${F.seg('hC', 'สี', [['#ffe600', 'เหลือง'], ['#7dff7d', 'เขียว'], ['#7fd7ff', 'ฟ้า'], ['#ffa3d5', 'ชมพู']], TD.highlight.color)}<div class="note">ลากคลุมข้อความที่ต้องการเน้น</div></div>`; bind = () => $('#hC').addEventListener('input', () => TD.highlight.color = V('hC')); break;
       case 'whiteout': html = head('ยางลบ / ปิดทับ') + `<div class="opt">${F.color('wC', 'สีที่ใช้ปิดทับ', TD.whiteout.color)}<div class="note">ลากกรอบทับบริเวณที่ต้องการลบออก (เช่น ลายน้ำ ข้อความเก่า) — ใช้สีขาวสำหรับพื้นกระดาษ</div></div>`; bind = () => $('#wC').addEventListener('input', () => TD.whiteout.color = V('wC')); break;
       case 'shape': html = head('รูปทรง') + `<div class="opt">${F.seg('sK', 'ชนิด', [['rect', 'สี่เหลี่ยม'], ['ellipse', 'วงรี'], ['line', 'เส้น'], ['arrow', 'ลูกศร']], TD.shape.kind)}<div class="row">${F.color('sSt', 'สีเส้น', TD.shape.stroke)}${F.num('sW', 'ความหนา', TD.shape.width, 1, 40)}</div>${F.chk('sFillOn', 'เติมสี', TD.shape.fillOn)}${F.color('sFill', 'สีพื้น', TD.shape.fill)}</div>`; bind = () => ['sK', 'sSt', 'sW', 'sFillOn', 'sFill'].forEach(id => $('#' + id).addEventListener('input', () => Object.assign(TD.shape, { kind: V('sK'), stroke: V('sSt'), width: V('sW'), fillOn: V('sFillOn'), fill: V('sFill') }))); break;
+      case 'redact': html = head('ปกปิดข้อมูล (Redact)') + `<div class="opt">${F.color('rC', 'สี', TD.redact.color)}<div class="note">ลากกรอบทับข้อมูลที่ต้องการลบถาวร ต่างจากยางลบตรงที่เนื้อหาใต้กรอบจะถูกลบออกจากไฟล์จริง ไม่ใช่แค่ปิดทับ</div></div>`; bind = () => $('#rC').addEventListener('input', () => TD.redact.color = V('rC')); break;
+      case 'note': html = head('หมายเหตุ') + `<div class="opt">${F.text('nAuth', 'ผู้เขียน', TD.note.author)}<div class="note">แตะบนหน้าเพื่อวางไอคอนหมายเหตุ แล้วพิมพ์ข้อความ</div></div>`; bind = () => $('#nAuth').addEventListener('input', () => TD.note.author = V('nAuth')); break;
+      case 'stamp': html = head('ตราประทับ') + `<div class="opt">${F.seg('stP', 'แบบสำเร็จ', [['อนุมัติ', 'อนุมัติ'], ['ตรวจแล้ว', 'ตรวจแล้ว'], ['ด่วน', 'ด่วน'], ['ลับ', 'ลับ'], ['ร่าง', 'ร่าง'], ['APPROVED', 'APPROVED'], ['CONFIDENTIAL', 'CONFIDENTIAL'], ['DRAFT', 'DRAFT']], TD.stamp.text)}${F.text('stT', 'หรือพิมพ์เอง', TD.stamp.text)}${F.color('stC', 'สี', TD.stamp.color)}<div class="note">แตะบนหน้าเพื่อประทับ</div></div>`; bind = () => { $('#stP').addEventListener('input', () => { TD.stamp.text = V('stP'); $('#stT').value = TD.stamp.text; }); $('#stT').addEventListener('input', () => TD.stamp.text = V('stT')); $('#stC').addEventListener('input', () => TD.stamp.color = V('stC')); }; break;
       case 'image': html = head('รูปภาพ') + `<div class="opt">${TD.image.asset ? `<img src="${assets[TD.image.asset].url}" style="max-height:120px;object-fit:contain;background:#fff;border-radius:8px">` : ''}<button class="btn ghost sm" id="imgPick">เลือกรูป…</button><div class="note">แตะบนหน้าเพื่อวาง จากนั้นลากปรับตำแหน่ง/ขนาดได้</div></div>`; bind = () => $('#imgPick').onclick = () => pickImage('image'); break;
       case 'sign': html = head('ลายเซ็น') + `<div class="opt">${TD.sign.asset ? `<img src="${assets[TD.sign.asset].url}" style="max-height:100px;object-fit:contain;background:#fff;border-radius:8px">` : ''}<button class="btn ghost sm" id="sigNew">วาด / อัปโหลดลายเซ็นใหม่…</button><div class="note">แตะบนหน้าเอกสารตรงจุดที่ต้องการลงนาม</div></div>`; bind = () => $('#sigNew').onclick = openSignModal; break;
       case 'wm': { const w = TD.wm; html = head('ลายน้ำ') + `<div class="opt">${F.seg('wType', 'ชนิด', [['text', 'ข้อความ'], ['logo', 'โลโก้ TESR'], ['img', 'รูปอื่น']], w.type)}${F.text('wTxt', 'ข้อความ', w.text)}<div class="row">${F.range('wOp', 'ความทึบ', w.opacity, 5, 100, 5, '%')}${F.range('wRot', 'มุม', w.rotate, -90, 90, 5, '°')}</div>${F.range('wSz', 'ขนาด (% ของหน้า)', w.size, 10, 100, 5, '%')}${F.color('wCol', 'สี', w.color)}${F.chk('wAll', 'ใส่ทุกหน้า', w.all)}<button class="btn primary" id="wApply">ใส่ลายน้ำ</button><div class="note">ลายน้ำจะกลายเป็นวัตถุบนหน้า — เลือกแล้วย้าย/ลบได้</div></div>`; bind = () => { const u = () => Object.assign(w, { type: V('wType'), text: V('wTxt'), opacity: V('wOp'), rotate: V('wRot'), size: V('wSz'), color: V('wCol'), all: V('wAll') }); ['wType', 'wTxt', 'wOp', 'wRot', 'wSz', 'wCol', 'wAll'].forEach(id => $('#' + id).addEventListener('input', u)); $('#wApply').onclick = applyWatermark; }; break; }
@@ -308,7 +364,7 @@ async function buildThumbs() {
   });
   for (let i = 0; i < pages.length; i++) { const img = L.children[i]?.querySelector('img'); if (img) img.src = await thumbUrl(pages[i]); }
 }
-function markCurThumb() { $('#thumbList').querySelectorAll('.tmb').forEach((t, i) => t.classList.toggle('cur', i === curPage)); if (tool === 'select' && !sel) renderProps(); }
+function markCurThumb() { $('#pgIn').value = curPage + 1; $('#pgTot').textContent = '/ ' + pages.length; if (findHits.length) { $('#thumbList').querySelectorAll('.tmb').forEach((t, i) => t.classList.toggle('cur', i === curPage)); return; } $('#thumbList').querySelectorAll('.tmb').forEach((t, i) => t.classList.toggle('cur', i === curPage)); if (tool === 'select' && !sel) renderProps(); }
 function pageOp(a, i) {
   if (a === 'rot') return rotatePage(i, 90);
   snapshot();
@@ -332,9 +388,15 @@ async function buildPdf(sel = null, onProg) {
   const out = await PDFDocument.create(); const list = sel || pages.map((_, i) => i); const embCache = {};
   for (let k = 0; k < list.length; k++) {
     const p = pages[list[k]]; const { W, H, r } = dispSize(p); const page = out.addPage([W, H]);
-    if (p.src != null) { const key = p.doc + ':' + p.src; if (!embCache[key]) { const lib = await getLib(p.doc); [embCache[key]] = await out.embedPdf(lib, [p.src]); } const emb = embCache[key]; const w = p.w, h = p.h;
+    const redacts = p.annots.filter(a => a.type === 'redact');
+    if (redacts.length && p.src != null) { // rasterize page with black boxes => underlying content is gone
+      const pg = await docs[p.doc].pdf.getPage(p.src + 1); const sc = 2; const vp = pg.getViewport({ scale: sc, rotation: r }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const ctx = c.getContext('2d'); await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+      redacts.forEach(a => { ctx.fillStyle = a.color; ctx.fillRect(a.x * sc, a.y * sc, a.w * sc, a.h * sc); });
+      const img = await out.embedJpg(await canvasBytes(c, 'image/jpeg', .9)); page.drawImage(img, { x: 0, y: 0, width: W, height: H });
+    } else if (p.src != null) { const key = p.doc + ':' + p.src; if (!embCache[key]) { const lib = await getLib(p.doc); [embCache[key]] = await out.embedPdf(lib, [p.src]); } const emb = embCache[key]; const w = p.w, h = p.h;
       if (r === 0) page.drawPage(emb, { x: 0, y: 0 }); else if (r === 90) page.drawPage(emb, { x: 0, y: w, rotate: degrees(-90) }); else if (r === 180) page.drawPage(emb, { x: w, y: h, rotate: degrees(180) }); else page.drawPage(emb, { x: h, y: 0, rotate: degrees(90) }); }
-    for (const a of p.annots) await drawAnnot(out, page, a, H);
+    for (const a of p.annots) if (a.type !== 'redact') await drawAnnot(out, page, a, H);
+    if (redacts.length && p.src == null) redacts.forEach(a => page.drawRectangle({ x: a.x, y: H - a.y - a.h, width: a.w, height: a.h, color: hexRgb(a.color) }));
     onProg && onProg((k + 1) / list.length);
   }
   out.setTitle(meta.title || fileName.replace(/\.pdf$/i, '')); out.setAuthor(meta.author); out.setSubject(meta.subject); out.setKeywords(meta.keywords.split(',').map(s => s.trim()).filter(Boolean)); out.setProducer('TESR PDF Editor'); out.setCreator('TESR PDF Editor'); out.setModificationDate(new Date());
@@ -352,8 +414,12 @@ async function drawAnnot(out, page, a, H) {
     case 'ellipse': page.drawEllipse({ x: a.x + a.w / 2, y: H - a.y - a.h / 2, xScale: a.w / 2, yScale: a.h / 2, borderColor: hexRgb(a.stroke), borderWidth: a.width, color: a.fillOn ? hexRgb(a.fill) : undefined }); break;
     case 'line': case 'arrow': { const L = (x1, y1, x2, y2) => page.drawLine({ start: { x: x1, y: H - y1 }, end: { x: x2, y: H - y2 }, thickness: a.width, color: hexRgb(a.stroke), lineCap: LineCapStyle.Round }); L(a.x1, a.y1, a.x2, a.y2); if (a.type === 'arrow') { const [h1, h2] = arrowHead(a); L(a.x2, a.y2, h1[0], h1[1]); L(a.x2, a.y2, h2[0], h2[1]); } break; }
     case 'ink': page.drawSvgPath(inkPath(a), { x: 0, y: H, borderColor: hexRgb(a.stroke), borderWidth: a.width, borderLineCap: LineCapStyle.Round }); break;
+    case 'stamp': { page.drawRectangle({ x: a.x, y: H - a.y - a.h, width: a.w, height: a.h, borderColor: hexRgb(a.color), borderWidth: 2.5, opacity: 0, borderOpacity: op, ...(a.rotate ? { rotate: degrees(a.rotate) } : {}) }); const r = await textToPng({ ...a, font: 'Kanit', bold: true }); const img = await out.embedPng(r.bytes); page.drawImage(img, imgOpts(img, { x: a.x, y: a.y, w: a.w, h: a.h })); break; }
+    case 'note': { const c = hexRgb(a.color); const ann = out.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [a.x, H - a.y - 20, a.x + 20, H - a.y], Contents: PDFHexString.fromText(a.text || ''), T: PDFHexString.fromText(a.author || 'TESR'), Name: 'Comment', C: [c.red, c.green, c.blue], F: 4, Open: false, M: PDFHexString.fromText('D:' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)) }); page.node.addAnnot(out.context.register(ann)); break; }
+    case 'ocr': { const font = await getThaiFont(out); if (!font) break; const txt = (a.text || '').replace(/[\u0000-\u001f]/g, ''); if (!txt.trim()) break; let size = a.h * .85; try { const w1 = font.widthOfTextAtSize(txt, size); if (w1 > a.w) size *= a.w / w1; page.drawText(txt, { x: a.x, y: H - a.y - a.h + a.h * .2, size, font, opacity: 0 }); } catch (e) { console.warn('ocr text skip', e); } break; }
   }
 }
+async function getThaiFont(out) { if (out._thFont) return out._thFont; try { if (!window._lomaBytes) window._lomaBytes = new Uint8Array(await (await fetch('vendor/Loma.otf')).arrayBuffer()); out.registerFontkit(window.fontkit); out._thFont = await out.embedFont(window._lomaBytes, { subset: true }); return out._thFont; } catch (e) { console.warn('font', e); return null; } }
 async function renderBytes(bytes, { scale = 1.5, onPage, onProg }) { const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise; for (let i = 1; i <= pdf.numPages; i++) { const pg = await pdf.getPage(i); const vp = pg.getViewport({ scale }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; await onPage(c, i, pdf.numPages); onProg && onProg(i / pdf.numPages); } return pdf; }
 const outName = suf => (settings.prefix ?? 'TESR_') + fileName.replace(/\.pdf$/i, '') + suf;
 
@@ -383,10 +449,68 @@ async function runExport(action) {
     if (n === 1) download(last, outName(fmt === 'jpeg' ? '.jpg' : '.png')); else download(await zip.generateAsync({ type: 'blob' }), outName('_images.zip'));
   }));
   if (action === 'text') return wrap('กำลังดึงข้อความ…', async () => {
-    let out = ''; for (let i = 0; i < pages.length; i++) { const p = pages[i]; if (p.src == null) continue; const tc = await (await docs[p.doc].pdf.getPage(p.src + 1)).getTextContent(); let line = '', lastY = null; tc.items.forEach(it => { if (lastY !== null && Math.abs(it.transform[5] - lastY) > 2) line += '\n'; line += it.str + (it.hasEOL ? '\n' : ''); lastY = it.transform[5]; }); p.annots.filter(a => a.type === 'text').forEach(a => line += '\n' + a.text); out += `--- หน้า ${i + 1} ---\n${line.trim()}\n\n`; busy(true, 'กำลังดึงข้อความ…', (i + 1) / pages.length); }
+    let out = ''; for (let i = 0; i < pages.length; i++) { const p = pages[i]; if (p.src == null) continue; const tc = await (await docs[p.doc].pdf.getPage(p.src + 1)).getTextContent(); let line = '', lastY = null; tc.items.forEach(it => { if (lastY !== null && Math.abs(it.transform[5] - lastY) > 2) line += '\n'; line += it.str + (it.hasEOL ? '\n' : ''); lastY = it.transform[5]; }); p.annots.filter(a => a.type === 'text' || a.type === 'ocr').forEach(a => line += '\n' + a.text); out += `--- หน้า ${i + 1} ---\n${line.trim()}\n\n`; busy(true, 'กำลังดึงข้อความ…', (i + 1) / pages.length); }
     if (!out.replace(/--- หน้า \d+ ---/g, '').trim()) throw new Error('ไม่พบข้อความ (อาจเป็น PDF สแกน)'); download(new Blob(['\ufeff' + out], { type: 'text/plain;charset=utf-8' }), outName('.txt'));
   });
+  if (action === 'share') return wrap('กำลังเตรียมไฟล์…', async () => { const bytes = await buildPdf(null, p => busy(true, 'กำลังเตรียมไฟล์…', p)); const f = new File([bytes], outName('.pdf'), { type: 'application/pdf' }); if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: fileName }).catch(() => { }); else { download(f, f.name); toast('อุปกรณ์นี้ไม่รองรับการแชร์โดยตรง — ดาวน์โหลดแล้ว'); } });
+  if (action === 'docx') return wrap('กำลังสร้าง Word…', async () => {
+    const paras = []; for (let i = 0; i < pages.length; i++) { const p = pages[i]; let lines = []; if (p.src != null) { const tc = await (await docs[p.doc].pdf.getPage(p.src + 1)).getTextContent(); let line = '', lastY = null; tc.items.forEach(it => { if (lastY !== null && Math.abs(it.transform[5] - lastY) > 2) { lines.push(line); line = ''; } line += it.str; lastY = it.transform[5]; }); if (line) lines.push(line); } p.annots.filter(a => a.type === 'ocr').sort((a, b) => a.y - b.y).forEach(a => lines.push(a.text)); p.annots.filter(a => a.type === 'text').forEach(a => lines.push(...a.text.split('\n'))); lines.filter(l => l.trim()).forEach(l => paras.push(l)); if (i < pages.length - 1) paras.push('\f'); busy(true, 'กำลังสร้าง Word…', (i + 1) / pages.length); }
+    if (!paras.filter(x => x !== '\f').length) throw new Error('ไม่พบข้อความ — ลองทำ OCR ก่อน'); download(await makeDocx(paras), outName('.docx'));
+  });
   if (action === 'meta') return modal(`<h3>ข้อมูลไฟล์</h3><div style="display:flex;flex-direction:column;gap:10px">${F.text('mTitle', 'Title', meta.title)}${F.text('mAuthor', 'Author', meta.author)}${F.text('mSubject', 'Subject', meta.subject)}${F.text('mKw', 'Keywords (คั่นด้วย ,)', meta.keywords)}${F.text('mName', 'ชื่อไฟล์', fileName)}</div>`, async () => { Object.assign(meta, { title: V('mTitle'), author: V('mAuthor'), subject: V('mSubject'), keywords: V('mKw') }); fileName = V('mName').replace(/\.pdf$/i, '') + '.pdf'; $('#fname').textContent = fileName; toast('บันทึกข้อมูลไฟล์แล้ว (มีผลตอนดาวน์โหลด)'); });
+}
+
+async function makeDocx(paras) {
+  const x = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const body = paras.map(p => p === '\f' ? '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' : `<w:p><w:pPr><w:spacing w:after="80"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="TH Sarabun New" w:hAnsi="TH Sarabun New" w:cs="TH Sarabun New"/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr><w:t xml:space="preserve">${x(p)}</w:t></w:r></w:p>`).join('');
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body></w:document>`);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
+
+/* ---------- find text ---------- */
+var findHits = [];
+async function findText(q) {
+  q = q.trim(); pageEls.forEach(d => d.querySelectorAll('.findhl').forEach(e => e.remove())); findHits = []; if (!q) { renderProps(); return; }
+  busy(true, 'กำลังค้นหา…'); const lq = q.toLowerCase();
+  try {
+    for (let i = 0; i < pages.length; i++) { const p = pages[i]; if (p.src == null) continue; const pg = await docs[p.doc].pdf.getPage(p.src + 1); const { r } = dispSize(p); const vp = pg.getViewport({ scale: 1, rotation: r }); const tc = await pg.getTextContent();
+      tc.items.forEach(it => { if (!it.str || !it.str.toLowerCase().includes(lq)) return; const [x1, y1] = vp.convertToViewportPoint(it.transform[4], it.transform[5]); const [x2, y2] = vp.convertToViewportPoint(it.transform[4] + it.width, it.transform[5] + it.height); findHits.push({ page: i, x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1) || 4, h: Math.abs(y2 - y1) || 8, str: it.str }); });
+      p.annots.filter(a => (a.type === 'ocr' || a.type === 'text') && a.text.toLowerCase().includes(lq)).forEach(a => findHits.push({ page: i, x: a.x, y: a.y, w: a.w, h: a.h, str: a.text }));
+    }
+  } finally { busy(false); }
+  findHits.forEach(h => pageEls[h.page]?.querySelector('.ov').appendChild(svgEl('rect', { class: 'findhl', x: h.x, y: h.y, width: h.w, height: h.h }))); 
+  const mk = s => esc(s).replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), m => `<mark>${m}</mark>`);
+  props.innerHTML = head(`ผลการค้นหา (${findHits.length})`) + (findHits.length ? `<div class="findres">${findHits.map((h, k) => `<button data-k="${k}"><b>หน้า ${h.page + 1}</b>${mk(h.str)}</button>`).join('')}</div>` : `<div class="note">ไม่พบ "${esc(q)}" — ถ้าเป็นเอกสารสแกน ให้ทำ OCR ก่อน</div>`) + `<button class="btn ghost sm" style="margin-top:10px" id="findClear">ล้างผลการค้นหา</button>`;
+  props.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { const h = findHits[+b.dataset.k]; scrollToPage(h.page); setTimeout(() => { const d = pageEls[h.page]; stage.scrollTop += (h.y * zoom) - 120; }, 350); });
+  $('#findClear').onclick = () => { $('#findIn').value = ''; findHits = []; findText(''); };
+  if (window.innerWidth <= 980) $('#ebody').classList.add('showProps'); if (findHits.length) { curPage = findHits[0].page; pageEls[curPage]?.scrollIntoView({ block: 'start' }); toast(`พบ ${findHits.length} รายการ`); }
+}
+$('#findIn').addEventListener('keydown', e => { if (e.key === 'Enter') findText(e.target.value); if (e.key === 'Escape') { e.target.value = ''; findText(''); } });
+
+/* ---------- OCR (Tesseract.js, loaded on demand) ---------- */
+function loadScript(src) { return new Promise((res, rej) => { if (document.querySelector(`script[src="${src}"]`)) return res(); const s = el('script', { src, onload: res, onerror: () => rej(new Error('โหลด ' + src + ' ไม่สำเร็จ')) }); document.head.appendChild(s); }); }
+function openOcrModal() {
+  modal(`<h3>สแกน &amp; OCR</h3><div style="display:flex;flex-direction:column;gap:10px">${F.seg('oLang', 'ภาษา', [['tha+eng', 'ไทย + อังกฤษ'], ['eng', 'อังกฤษ'], ['tha', 'ไทย']], 'tha+eng')}${F.seg('oScope', 'หน้า', [['cur', 'หน้าปัจจุบัน'], ['all', 'ทุกหน้า']], 'cur')}<div class="note">ระบบจะอ่านตัวอักษรจากภาพแล้วซ่อนเป็น text layer ทำให้ PDF ค้นหา/คัดลอก/แปลงเป็น Word ได้ ครั้งแรกจะดาวน์โหลดข้อมูลภาษา (~10 MB) ใช้เวลาสักครู่ต่อหน้า</div></div>`, async () => {
+    const lang = V('oLang'), scope = V('oScope'); const targets = scope === 'all' ? pages.map((_, i) => i) : [curPage];
+    busy(true, 'กำลังโหลดเครื่องมือ OCR…');
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js');
+      const worker = await Tesseract.createWorker(lang, 1, { logger: m => { if (m.status && m.progress != null) busy(true, (m.status === 'recognizing text' ? 'กำลังอ่านข้อความ' : 'กำลังเตรียม OCR') + '…', m.progress); } });
+      snapshot(); let total = 0;
+      for (let k = 0; k < targets.length; k++) {
+        const i = targets[k], p = pages[i]; const { W, H, r } = dispSize(p); const sc = 2.2; const c = document.createElement('canvas'); c.width = Math.round(W * sc); c.height = Math.round(H * sc);
+        if (p.src != null) { const pg = await docs[p.doc].pdf.getPage(p.src + 1); await pg.render({ canvasContext: c.getContext('2d'), viewport: pg.getViewport({ scale: sc, rotation: r }) }).promise; } else continue;
+        busy(true, `กำลังอ่านหน้า ${i + 1} (${k + 1}/${targets.length})…`, 0); const { data } = await worker.recognize(c);
+        p.annots = p.annots.filter(a => a.type !== 'ocr');
+        (data.lines || []).forEach(l => { const t = (l.text || '').trim(); if (!t || l.confidence < 30) return; const b = l.bbox; p.annots.push({ id: uid(), type: 'ocr', x: b.x0 / sc, y: b.y0 / sc, w: (b.x1 - b.x0) / sc, h: (b.y1 - b.y0) / sc, text: t }); total++; });
+        drawOverlay(i);
+      }
+      await worker.terminate(); toast(`OCR เสร็จ — พบ ${total} บรรทัด (ดาวน์โหลด PDF เพื่อได้ไฟล์ที่ค้นหาได้)`);
+    } catch (e) { console.error(e); toast('OCR ไม่สำเร็จ: ' + e.message); } finally { busy(false); }
+  });
 }
 
 /* ---------- landing ---------- */
