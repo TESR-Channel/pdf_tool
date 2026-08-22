@@ -1,7 +1,8 @@
 /* TESR PDF Tools — client-side only. pdf-lib + PDF.js + JSZip */
 'use strict';
-const { PDFDocument, degrees, rgb, StandardFonts, PDFName } = PDFLib;
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const LIBS_OK = typeof PDFLib !== 'undefined' && typeof pdfjsLib !== 'undefined' && typeof JSZip !== 'undefined';
+const { PDFDocument, degrees, rgb, StandardFonts, PDFName } = LIBS_OK ? PDFLib : {};
+if (LIBS_OK) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 /* ---------------- helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -195,7 +196,7 @@ function moveFile(i, d) { const j = i + d; if (j < 0 || j >= files.length) retur
 function removeFile(i) { files.splice(i, 1); renderFiles(); onFilesChanged(); }
 function onFilesChanged() { result.style.display = 'none'; setStatus(''); if (cur.onFiles) cur.onFiles(); }
 runBtn.addEventListener('click', async () => {
-  if (!files.length) return; runBtn.disabled = true; result.style.display = 'none'; setStatus('กำลังประมวลผล…'); setProg(0);
+  if (!files.length) return; if (!LIBS_OK) return setStatus('โหลดไลบรารีไม่สำเร็จ — ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วรีเฟรชหน้า', true); runBtn.disabled = true; result.style.display = 'none'; setStatus('กำลังประมวลผล…'); setProg(0);
   try { await HANDLERS[cur.id](); setStatus('เสร็จสิ้น'); }
   catch (e) { console.error(e); setStatus('เกิดข้อผิดพลาด: ' + (e.message || e), true); }
   finally { setProg(null); runBtn.disabled = false; }

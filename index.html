@@ -52,9 +52,10 @@ header.top{
   border-bottom:1px solid var(--line)}
 .logo{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit}
 .logo img{flex:none}
-.logo .t1{font-family:'Kanit';font-weight:700;font-size:19px;line-height:1.1}
+.logo .t1{font-family:'Kanit';font-weight:700;font-size:19px;line-height:1.1;white-space:nowrap}
 .logo .t1 span{color:var(--gold)}
-.logo .t2{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.logo .t2{font-size:12px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+@media(max-width:640px){.top .pill{display:none}.logo .t2{font-size:10px;letter-spacing:.04em}.logo img{width:42px!important;height:42px!important}}
 .top .spacer{flex:1}
 .pill{font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
 .pill i{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
@@ -71,14 +72,14 @@ nav.bottom button svg{width:22px;height:22px}
 nav.bottom button.active{color:var(--gold)}
 
 /* ===== desktop sidebar ===== */
+aside.side{display:none}
 @media(min-width:980px){
   .app{grid-template-columns:240px 1fr}
   header.top{grid-column:1/-1}
   aside.side{display:block;position:sticky;top:71px;height:calc(100dvh - 71px);border-right:1px solid var(--line);padding:18px 12px;background:rgba(18,18,22,.5)}
   nav.bottom{display:none}
-  main{padding-bottom:40px}
+  main{padding-bottom:40px;grid-column:2}
 }
-aside.side{display:none}
 aside.side button{width:100%;text-align:left;background:none;border:0;color:var(--muted);padding:10px 12px;border-radius:10px;font-size:15px;display:flex;gap:10px;align-items:center;font-family:'Kanit';font-weight:500}
 aside.side button svg{width:20px;height:20px}
 aside.side button.active,aside.side button:hover{background:var(--panel2);color:var(--txt)}
@@ -119,7 +120,7 @@ aside .side-foot{position:absolute;bottom:16px;left:12px;right:12px;font-size:12
 .card:active{transform:scale(.98)}
 .card .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--ico,#333);box-shadow:0 6px 16px rgba(0,0,0,.35)}
 .card .ic svg{width:24px;height:24px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.card h3{font-size:16px;line-height:1.25}
+.card h3{font-size:16px;line-height:1.25;word-break:keep-all}
 .card p{font-size:12.5px;color:var(--muted);line-height:1.4}
 .card .tag{position:absolute;top:12px;right:12px;font-size:10px;padding:2px 8px;border-radius:999px;background:rgba(201,168,76,.15);color:var(--gold);font-family:'Kanit'}
 .card:after{content:"";position:absolute;right:-18px;bottom:-18px;width:84px;height:84px;border-radius:50%;background:var(--ico,#333);opacity:.12}
