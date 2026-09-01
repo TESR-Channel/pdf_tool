@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0b0d">
 <title>TESR PDF Editor</title>
 <meta name="description" content="PDF Editor ของ TESR — แก้ไข ลงนาม ใส่ลายน้ำ จัดหน้า แปลงไฟล์ ทำงานบน browser ทั้งหมด">
@@ -75,7 +75,9 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .lfoot{margin-top:40px;color:var(--muted);font-size:12px}
 
 /* ======== EDITOR ======== */
-.mbar{display:flex;align-items:center;gap:2px;padding:0 10px;background:var(--bg2);border-bottom:1px solid var(--line);height:40px;flex:none}
+.mbar{display:flex;align-items:center;gap:2px;padding:0 10px;background:var(--bg2);border-bottom:1px solid var(--line);height:40px;flex:none;overflow-x:auto;scrollbar-width:none;min-width:0}
+.mbar::-webkit-scrollbar{display:none}
+.mbar .find{flex:none}
 .mbar button.tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 12px;font-family:'Kanit';font-weight:500;font-size:13.5px;white-space:nowrap}
 .mbar button.tab.on{color:var(--txt);border-bottom-color:var(--red)}
 .mbar .sp{flex:1}
@@ -109,9 +111,9 @@ input,select,textarea{font-family:inherit;font-size:14px}
 @media(max-width:980px){.ebody{grid-template-columns:1fr}.rrail{display:none}.lpanel{display:none;position:fixed;left:0;top:0;bottom:0;width:min(82vw,280px);z-index:40;box-shadow:var(--shadow)}.ebody.showThumbs .lpanel{display:flex}.stagebar{display:flex}}
 @media(min-width:981px){.stagebar{display:none}}
 
-#editor{display:none;height:100dvh;flex-direction:column}
+#editor{display:none;height:100dvh;flex-direction:column;width:100vw;max-width:100%;overflow:hidden}
 #editor.on{display:flex}
-.ebar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border-bottom:1px solid var(--line);height:56px;flex:none;position:relative}
+.ebar{display:flex;align-items:center;gap:10px;padding:8px 10px;min-width:0;background:var(--bg2);border-bottom:1px solid var(--line);height:56px;flex:none;position:relative}
 .ebar .brand img{width:36px;height:36px}.ebar .brand .t2{display:none}.ebar .brand .t1{font-size:16px}
 .ebar .fname{flex:1;text-align:center;font-family:'Kanit';font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gold2);min-width:0}
 .ebar .fname small{display:block;font-size:11px;color:var(--muted);font-family:'Sarabun';font-weight:400}
@@ -119,9 +121,10 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .ibtn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .ibtn:hover{background:var(--panel2);color:var(--txt)}.ibtn:disabled{opacity:.3}
 .ebar .acts{display:flex;gap:6px;align-items:center}
-@media(max-width:720px){.ebar .brand .t1{display:none}.ebar .acts .lbl{display:none}.ebar .btn{padding:9px 11px}.ebar .fname{font-size:12px}}
+@media(max-width:720px){.ebar .brand .t1{display:none}.ebar .acts .lbl{display:none}.ebar .btn{padding:9px 11px}.ebar .fname{font-size:12px}.ebar .acts{gap:2px}.ebar .brand img{width:30px;height:30px}}
+@media(max-width:480px){.ebar .fname small{display:none}.ebar #undoBtn,.ebar #redoBtn{width:30px}}
 
-.tools{display:flex;gap:2px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:none}
+.tools{display:flex;gap:2px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:none;-webkit-overflow-scrolling:touch;min-width:0}
 .tools::-webkit-scrollbar{display:none}
 .tool{background:none;border:1px solid transparent;border-radius:10px;min-width:64px;padding:6px 6px 4px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--muted);font-size:11px;font-family:'Kanit';font-weight:400;flex:none;position:relative;line-height:1.2}
 .tool svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -148,10 +151,11 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .tmb .ta button:hover{color:var(--txt);border-color:var(--gold)}
 .thumbs .tf{padding:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
 
-.stagewrap{position:relative;min-height:0;display:flex;flex-direction:column}
-.stage{flex:1;overflow:auto;background:#1a1a20;position:relative;padding:20px 16px 90px;touch-action:pan-x pan-y}
+.stagewrap{position:relative;min-height:0;min-width:0;display:flex;flex-direction:column}
+.stage{flex:1;min-width:0;overflow:auto;background:#1a1a20;position:relative;padding:0;touch-action:pan-x pan-y pinch-zoom;-webkit-overflow-scrolling:touch}
+.stage .inner{display:inline-flex;flex-direction:column;align-items:center;min-width:100%;padding:20px 16px 90px;box-sizing:border-box}
 .stage.cross{cursor:crosshair}.stage.drawing{touch-action:none}
-.pg{position:relative;margin:0 auto 24px;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+.pg{position:relative;margin:0 0 24px;flex:none;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.6)}
 .pg canvas{display:block;width:100%;height:100%}
 .pg .ov{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .pg .lbl{position:absolute;left:0;right:0;bottom:-19px;text-align:center;font-size:11px;color:var(--muted)}
@@ -288,7 +292,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
 <div class="toast" id="toast"></div>
 <iframe id="printFrame" style="position:fixed;width:0;height:0;border:0;opacity:0" title="print"></iframe>
 
-<script src="vendor/fontkit.umd.min.js"></script>
+<script src="fontkit.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
