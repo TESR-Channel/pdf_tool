@@ -37,7 +37,7 @@ PDF Editor สำหรับทีม TESR Co., Ltd. (Thai Embedded System and 
 
 ## สำหรับผู้ดูแล (Deploy)
 Repo นี้เป็น static site — GitHub Pages ตั้งค่า **Settings → Pages → Source: Deploy from a branch → `main` / (root)**
-ไฟล์หลัก: `index.html`, `app.js`, `logo.png` (โลโก้ ใช้ทั้ง UI / ตรายาง / ลายน้ำ), `Loma.otf` (ฟอนต์ไทยสำหรับ OCR text layer), `fontkit.umd.min.js`, `manifest.json`
+ไฟล์หลัก: `index.html`, `app.js` + `patch-responsive.js` (แพตช์จอเล็ก โหลดต่อจาก app.js), `logo.png` (โลโก้ ใช้ทั้ง UI / ตรายาง / ลายน้ำ), `Loma.otf` (ฟอนต์ไทยสำหรับ OCR text layer), `fontkit.umd.min.js`, `manifest.json`
 เปิดไฟล์จาก URL ได้ด้วย `?file=path/to/file.pdf` (ต้องอยู่ใน repo เดียวกันหรืออนุญาต CORS)
 
 ## Stack
