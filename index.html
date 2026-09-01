@@ -184,6 +184,17 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .modal .box h3{font-size:17px;margin-bottom:12px}
 .modal .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
 @media(min-width:981px){.stagebar{display:none}}
+/* inline text editing + context menu */
+.inline-edit{position:absolute;z-index:6;outline:2px solid var(--crimson);outline-offset:1px;background:rgba(255,255,255,.9);white-space:pre-wrap;word-break:break-word;border-radius:3px;caret-color:#000;cursor:text;box-sizing:border-box;box-shadow:0 4px 18px rgba(0,0,0,.25)}
+.ctx{position:fixed;z-index:95;min-width:230px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:5px;box-shadow:var(--shadow);display:none}
+.ctx.on{display:block;animation:ctxin .12s ease}
+@keyframes ctxin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.ctx button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;background:none;border:0;padding:8px 11px;border-radius:8px;font-size:13.5px;color:var(--txt);text-align:left}
+.ctx button:hover:not(:disabled){background:var(--panel)}.ctx button:disabled{opacity:.35;cursor:default}
+.ctx button kbd{font-family:inherit;font-size:11px;color:var(--muted);white-space:nowrap}
+.ctx hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.pg{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.pg .inline-edit{-webkit-user-select:text;user-select:text}
 </style>
 </head>
 <body>
@@ -295,5 +306,6 @@ input,select,textarea{font-family:inherit;font-size:14px}
 <script src="fontkit.umd.min.js"></script>
 <script src="app.js"></script>
 <script src="patch-responsive.js"></script>
+<script src="ux.js"></script>
 </body>
 </html>
