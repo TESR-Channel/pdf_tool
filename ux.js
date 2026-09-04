@@ -2,8 +2,12 @@
    - แก้ข้อความบนหน้าทันทีด้วยดับเบิลคลิก (inline editing) / ดับเบิลคลิกที่ว่าง = เพิ่มข้อความ
    - คลิกขวา / กดค้าง = เมนูบริบท
    - คีย์ลัด Ctrl+C/X/V/D/S/P/F/Z/Y/+/−/0, Delete, Enter, ลูกศร, ตัวอักษรสลับเครื่องมือ
+   - ข้อความพื้นหลังโปร่งใสเป็นค่าเริ่มต้น (เลือกขาว/เหลือง/สีเองได้ที่ panel ขวา)
    ทำงานเป็นชั้นบน app.js: ดักเหตุการณ์ในเฟส capture ก่อน handler เดิม แล้วหยุดส่งต่อเมื่อจัดการเอง */
 'use strict';
+
+/* WYSIWYG: กล่องพิมพ์ inline โปร่งใส (ไม่บังเนื้อหาเอกสาร) */
+document.head.insertAdjacentHTML('beforeend', '<style>.inline-edit{background:transparent!important;outline-style:dashed!important;box-shadow:none!important}</style>');
 
 /* ---------- inline text editing ---------- */
 let inlineEd = null;
@@ -15,7 +19,7 @@ function newTextAt(i, x, y, text = '') {
 function startInlineEdit(i, a, isNew = false) {
   finishInlineEdit(); if (!isNew) snapshot();
   const d = pageEls[i]; const m = measureText(a); const ed = el('div', { className: 'inline-edit', contentEditable: 'true', spellcheck: false });
-  Object.assign(ed.style, { left: a.x * zoom + 'px', top: a.y * zoom + 'px', fontSize: a.size * zoom + 'px', fontFamily: (a.type === 'stamp' ? 'Kanit' : (a.font || 'Sarabun')) + ', sans-serif', fontWeight: (a.bold || a.type === 'stamp') ? 700 : 500, color: a.color, padding: m.pad * zoom + 'px', lineHeight: 1.4, minWidth: a.size * 2 * zoom + 'px', opacity: a.opacity ?? 1 });
+  Object.assign(ed.style, { left: a.x * zoom + 'px', top: a.y * zoom + 'px', fontSize: a.size * zoom + 'px', fontFamily: (a.type === 'stamp' ? 'Kanit' : (a.font || 'Sarabun')) + ', sans-serif', fontWeight: (a.bold || a.type === 'stamp') ? 700 : 500, color: a.color, padding: m.pad * zoom + 'px', lineHeight: 1.4, minWidth: a.size * 2 * zoom + 'px', opacity: a.opacity ?? 1, background: a.bg || 'transparent', caretColor: a.color || '#000' });
   ed.innerText = a.text; d.appendChild(ed); inlineEd = { i, a, ed }; drawOverlay(i);
   const sync = () => { a.text = ed.innerText.replace(/\n$/, ''); Object.assign(a, wh(measureText(a))); if (a.type === 'stamp') a.w += 10; drawOverlay(i); };
   ed.addEventListener('input', sync);
@@ -130,13 +134,42 @@ stage.addEventListener('contextmenu', e => {
   }
 });
 
+/* ---------- optional text background (default: โปร่งใส) ---------- */
+/* SVG overlay: paint bg rect when a.bg is set */
+const _annotSvg = annotSvg;
+annotSvg = function (a) { const e = _annotSvg(a); if (a.type === 'text' && a.bg) { const r = e.querySelector('rect'); if (r) r.setAttribute('fill', a.bg); } return e; };
+/* PDF export: composite text PNG over the chosen background */
+const _textToPng = textToPng;
+textToPng = async function (a, scale = 3) {
+  const r = await _textToPng(a, scale);
+  if (a.type === 'text' && a.bg) {
+    const img = await new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = URL.createObjectURL(new Blob([r.bytes], { type: 'image/png' })); });
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d');
+    x.fillStyle = a.bg; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0); URL.revokeObjectURL(img.src);
+    r.bytes = await canvasBytes(c, 'image/png');
+  }
+  return r;
+};
+/* props panel: background picker for text (selected annot + tool defaults) */
+function bgField(id, cur) {
+  return `<div class="field"><label>พื้นหลังข้อความ</label><div class="seg" id="${id}" data-v="${cur || ''}"><button type="button" data-v="" class="${!cur ? 'on' : ''}">โปร่งใส</button><button type="button" data-v="#ffffff" class="${cur === '#ffffff' ? 'on' : ''}">ขาว</button><button type="button" data-v="#fff3a3" class="${cur === '#fff3a3' ? 'on' : ''}">เหลือง</button><button type="button" data-v="custom" class="${cur && cur !== '#ffffff' && cur !== '#fff3a3' ? 'on' : ''}">สีเอง</button></div><input type="color" id="${id}C" value="${cur && cur.startsWith('#') ? cur : '#ffffff'}" style="margin-top:6px;width:44px;height:32px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);padding:2px;display:${cur && cur !== '#ffffff' && cur !== '#fff3a3' ? '' : 'none'}"></div>`;
+}
+function bindBg(id, apply) {
+  const seg = document.getElementById(id), col = document.getElementById(id + 'C'); if (!seg) return;
+  seg.addEventListener('input', () => { const v = seg.dataset.v; col.style.display = v === 'custom' ? '' : 'none'; apply(v === 'custom' ? col.value : (v || null)); });
+  col.addEventListener('input', () => apply(col.value));
+}
+
 /* ---------- props panel tweaks (hints + close inline editor when the side textarea is used) ---------- */
 const _renderProps = renderProps;
 renderProps = function (focusText = false) {
   _renderProps(focusText);
   const t = $('#pTxt'); if (t) t.addEventListener('focus', finishInlineEdit);
+  const a = sel ? pages[sel.page]?.annots.find(q => q.id === sel.id) : null;
+  if (a && a.type === 'text' && $('#pOp')) { $('#pOp').closest('.field').insertAdjacentHTML('afterend', bgField('pBg', a.bg)); bindBg('pBg', v => updateSel(q => { q.bg = v; if (inlineEd?.a === q) inlineEd.ed.style.background = v || 'transparent'; })); }
+  if (tool === 'text' && !a && $('#tBold')) { $('#tBold').closest('.chk').insertAdjacentHTML('afterend', bgField('tBg', TD.text.bg)); bindBg('tBg', v => TD.text.bg = v || undefined); }
   if (tool === 'select' && !sel && props.querySelector('.note')) props.querySelector('.note').innerHTML = '<b>ดับเบิลคลิก</b>ข้อความเพื่อแก้ตรงนั้นทันที · ดับเบิลคลิกที่ว่างเพื่อเพิ่มข้อความ · <b>คลิกขวา</b>เพื่อดูเมนู · ลากเพื่อย้าย · จุดมุมขวาล่างปรับขนาด · ลูกศรเลื่อนทีละนิด<br><br>คีย์ลัด: Ctrl+C/X/V คัดลอก-ตัด-วาง · Ctrl+D ทำสำเนา · Ctrl+S ดาวน์โหลด · Ctrl+P พิมพ์ · Ctrl+F ค้นหา · Ctrl+Z/Y เลิกทำ/ทำซ้ำ · Delete ลบ · Enter แก้ข้อความ · V/T/H/B/E/U/I/N/G/K/R สลับเครื่องมือ';
-  if (tool === 'text' && !sel) { const n = props.querySelector('.note'); if (n) n.textContent = 'แตะบนหน้าเอกสารเพื่อวางกล่องข้อความ แล้วพิมพ์ได้ทันทีตรงนั้น (Esc หรือคลิกที่อื่นเพื่อจบ · Ctrl+Enter ก็ได้)'; }
+  if (tool === 'text' && !sel) { const n = props.querySelector('.note'); if (n) n.textContent = 'แตะบนหน้าเอกสารเพื่อวางกล่องข้อความ แล้วพิมพ์ได้ทันทีตรงนั้น (Esc หรือคลิกที่อื่นเพื่อจบ · Ctrl+Enter ก็ได้) · พื้นหลังข้อความเริ่มต้น = โปร่งใส ไม่บังเนื้อหาเดิม (เลือกขาว/เหลือง/สีเองได้ด้านบน)'; }
 };
 /* on phones, don't pop the options drawer for the text tool (it would cover the keyboard) */
 const _setTool = setTool;
